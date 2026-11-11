@@ -172,6 +172,7 @@
 
 <main class="wrap">
   <!-- FLUX -->
+  <p class="hint" id="volatile" hidden style="margin-top:14px">⚠️ Ce navigateur bloque le stockage : les activités seront perdues à la fermeture de la page.</p>
   <section class="view on" id="v-feed">
     <div id="weekStrip"></div>
     <h2>Activités</h2>
@@ -283,11 +284,34 @@
       t.onerror = () => rej(t.error);
     });
   };
-  const store = {
+  const idb = {
     all: () => tx('readonly', (s) => s.getAll()),
     put: (v) => tx('readwrite', (s) => s.put(v)),
     del: (id) => tx('readwrite', (s) => s.delete(id)),
     clear: () => tx('readwrite', (s) => s.clear()),
+  };
+  // Repli si IndexedDB est bloqué (aperçu intégré, navigation privée…) :
+  // localStorage si possible, sinon mémoire seule.
+  let mem = null, volatile = false;
+  const memSave = () => {
+    try { localStorage.setItem('ardeur.sessions', JSON.stringify(mem)); volatile = false; }
+    catch { volatile = true; }
+    document.getElementById('volatile').hidden = !volatile;
+  };
+  const toMem = () => {
+    if (mem) return;
+    try { mem = JSON.parse(localStorage.getItem('ardeur.sessions')) || []; } catch { mem = []; }
+    memSave();
+  };
+  const guard = (name, memFn) => async (arg) => {
+    if (!mem) { try { return await idb[name](arg); } catch { toMem(); } }
+    const r = memFn(arg); if (name !== 'all') memSave(); return r;
+  };
+  const store = {
+    all: guard('all', () => mem.slice()),
+    put: guard('put', (v) => { mem = mem.filter((s) => s.id !== v.id); mem.push(v); }),
+    del: guard('del', (id) => { mem = mem.filter((s) => s.id !== id); }),
+    clear: guard('clear', () => { mem = []; }),
   };
 
   const pref = {
